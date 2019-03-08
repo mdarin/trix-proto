@@ -1,0 +1,99 @@
+#!/usr/bin/perl -w
+use warnings;
+use strict;
+
+die "Usage: pd scr [dest]\n"
+	if (1 > @ARGV);
+
+my $src = shift @ARGV;
+my $dest = shift @ARGV || "forecast.csv";
+
+print "src: $src\ndest: $dest\n";
+
+# get price
+my $price = 0.0;
+open my $fin, "<$src"
+	or die "Can't open $src file: $!";
+grep {chomp;
+	if ( m/(\d+\.\d+)/gi ) {
+		$price = $1;
+	}
+} <$fin>;
+close $fin
+	or warn "Can't close $src file: $!";
+
+print "current price: $price\n";
+
+# get minmax
+my $params;
+open my $mm_db, "minmax.csv"
+	or die "Can't open minmax.csv file: $!";
+grep {chomp;
+	if ( m/(.+)\:(.+)/gi ) {
+		$params->{$1} = $2;
+	}
+} <$mm_db>;
+close $mm_db;
+
+while (my($key, $value) =each %$params) {
+	print "$key:$value\n";
+}
+
+# get tp_tab
+my $tp_tab;
+my $from = 0;
+open my $tp_tab_db, "<tp_tab.csv"
+	or die "Can't open tp_tab.csv file: $!";
+grep { chomp;
+	my $line = [split "\t"];
+	foreach my $to (0..@$line-1) {
+		$tp_tab->[$from][$to] = $line->[$to];	
+	}
+	$from ++;
+} <$tp_tab_db>;
+close $tp_tab_db; 
+
+# определить текущий диапазон (состояние) цены
+my $qlevs = init_quantum_levels($params);
+foreach my $i (0..@$qlevs-1) {
+	if ($i < @$qlevs-2) {
+		if ($qlevs->[$i] < $price && $price < $qlevs->[$i+1]) {
+			$from = $i;
+			print "* lo: $qlevs->[$i] price: $price hi: $qlevs->[$i+1] cur dia: $from\n";
+		}
+	} else {
+		if ($qlevs->[$i-1] < $price && $price < $qlevs->[$i]) {
+			$from = $i;
+			print "* lo: $qlevs->[$i-1] price: $price hi: $qlevs->[$i] cur dia: $from\n";
+		}	
+	}
+}
+
+# выдать наболее вероятный диапазон в котором окажется цена на следующем шаге
+my $most_prob = $tp_tab->[$from][0];
+my $lo = 0;
+my $hi = 0;
+foreach my $to (1..@$tp_tab-1) {
+	if ($most_prob < $tp_tab->[$from][$to]) {
+		$most_prob = $tp_tab->[$from][$to];
+		$lo = $to;
+		$hi = $to+1;
+	}
+}
+
+print "[forecast]\nlo: $qlevs->[$lo]\nhi: $qlevs->[$hi]\n";
+
+
+
+
+
+# -----------------------------------------------------------------------------
+sub init_quantum_levels {
+	my $params = shift;
+	my $qlevs = [];
+	$qlevs->[0] = $params->{'min'};
+	for my $i (1..$params->{'dias'}-1) {
+		$qlevs->[$i] = $params->{'dia'} + $qlevs->[$i-1]; 
+	}
+	$qlevs;
+}

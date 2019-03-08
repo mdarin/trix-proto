@@ -1,0 +1,39 @@
+#!/usr/bin/perl -w
+use warnings;
+use strict;
+
+
+die "Usage: tpt src [dest]\n"
+	if (1 > @ARGV);
+
+my $src = shift @ARGV;
+my $dest = shift @ARGV || "tp_tab.csv";
+
+my $tp_tab;
+my $from = 0;
+open my $fin, "<$src"
+	or die "Can't open $src file: $!";
+grep { chomp;
+	my $line = [split /\t/];
+	my $line_sum = $line->[-1];
+	foreach my $to (0..@$line-2) {
+		if ($line_sum) {
+			$tp_tab->[$from][$to] = $line->[$to] / $line_sum;
+		} else {
+			$tp_tab->[$from][$to] = 0;
+		}
+	}
+	$from ++;
+} <$fin>;
+close $fin
+	or warn "Can't close $src file: $!";
+
+# out transinions probabilities table
+open my $fout, ">$dest"
+	or die "Can't open $dest file: $!";
+foreach my $line (@$tp_tab) {
+	my $prepared = join "\t", @$line;
+	print $fout "$prepared\n";
+}
+close $fout
+	or warn "Can't close $dest file: $!";

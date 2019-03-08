@@ -1,0 +1,133 @@
+#!/usr/bin/perl -w
+use warnings;
+use strict;
+
+die "Usage: ftt src [dest]\n"
+	if (1 > @ARGV);
+
+my $src = shift @ARGV;
+my $dest = shift @ARGV || "tf_tab.csv";
+
+print "src: $src\ndest: $dest\n";
+
+my $mm_fname = "minmax.csv";
+my $params = &init_params($mm_fname); # params min, max prices,number of diapasones, dia size etc
+my $tf_tab = &init_tf_tab($params); # transitions freaquency table
+my $from = 0;
+my $to = 0;
+my $qlevs = &init_quantum_levels($params); # prece quantum levels form dia to dia for every dias
+my $first_time = 1;
+
+# fill in transitions frequency table
+open my $fin, "<$src"
+	or die "Can't open $src file: $!";
+grep { chomp;
+	if ( m/(\d+\.\d+)/gi ) { 
+		my $price = $1;
+		if ($first_time) {
+			# обрабатываем самую первую цену в списке цен\
+			# зедесь из дейсвтвий производится только определение текущей цены
+			# и инициализация переменной $from
+			foreach my $i (0..@$qlevs-1) {
+				if ($i < @$qlevs-2) {
+					if ($qlevs->[$i] < $price && $price < $qlevs->[$i+1]) {
+						$from = $i;
+						print "* lo: $qlevs->[$i] price: $price hi: $qlevs->[$i+1] cur dia: $from\n";
+					}
+				} else {
+					if ($qlevs->[$i-1] < $price && $price < $qlevs->[$i]) {
+						$from = $i;
+						print "* lo: $qlevs->[$i-1] price: $price hi: $qlevs->[$i] cur dia: $from\n";
+					}	
+				}
+			}
+			$first_time = 0;		
+		}	else {
+			# обрабатываем все остальные цены
+			foreach my $i (0..@$qlevs-1) {
+				if ($i < @$qlevs-2) {
+					if ($qlevs->[$i] < $price && $price < $qlevs->[$i+1]) {
+						$tf_tab->[$from][$to] += 1;
+						$to = $from;
+						$from = $i;
+						print "lo: $qlevs->[$i] price: $price hi: $qlevs->[$i+1] cur dia: $from\n";
+					}
+				} else {
+					if ($qlevs->[$i-1] < $price && $price < $qlevs->[$i]) {
+						$tf_tab->[$from][$to] += 1;
+						$to = $from;
+						$from = $i;
+						print "lo: $qlevs->[$i-1] price: $price hi: $qlevs->[$i] cur dia: $from\n";
+					}	
+				}
+			}		
+		}
+	} 
+} <$fin>;
+close $fin;
+
+$tf_tab = &calc_tf_tab_line_sum($tf_tab);
+
+# out to file
+open my $fout, ">$dest"
+	or die "Can't open TF Tab file: $!";
+foreach my $line (@$tf_tab) {
+	my $prepared = join "\t", @$line;
+	print $fout "$prepared\n";
+}
+close $fout 
+	or warn "Can't close TF Tab file: $!";
+
+# #############################################################################
+# Subroutines definitions
+#
+
+# -----------------------------------------------------------------------------
+sub init_params {
+	my $mm_fname = shift;
+	my $params = {}; 
+	open my $fmm_db, "<$mm_fname"
+		or die "Can't open $mm_fname file: $!";
+	grep { chomp;
+		if ( m/(.+?)\:(.+)/gi ) {
+			$params->{$1} = $2;
+		}
+	} <$fmm_db>;
+	close $fmm_db;
+	$params;
+}
+# -----------------------------------------------------------------------------
+sub init_tf_tab {
+	my $params = shift;
+	my $tf_tab;
+	return $tf_tab if ($params->{'dias'} <= 0);
+	foreach my $from (0..$params->{'dias'}-1) {
+		foreach my $to (0..$params->{'dias'}) { # +1 column for storring line summa result
+			$tf_tab->[$from][$to] = 0;
+		}
+	}
+	$tf_tab;
+}
+# -----------------------------------------------------------------------------
+sub calc_tf_tab_line_sum {
+	my $tf_tab = shift;
+	foreach my $from (0..@$tf_tab-1) {
+		my $line_sum = 0;
+		foreach my $to (0..@$tf_tab-1) {
+			next unless $tf_tab->[$from][$to]; 			
+			$line_sum += $tf_tab->[$from][$to]; 
+		}
+		$tf_tab->[$from][@$tf_tab] = $line_sum;
+	}
+	$tf_tab;
+}
+# -----------------------------------------------------------------------------
+sub init_quantum_levels {
+	my $params = shift;
+	my $qlevs = [];
+	$qlevs->[0] = $params->{'min'};
+	for my $i (1..$params->{'dias'}-1) {
+		$qlevs->[$i] = $params->{'dia'} + $qlevs->[$i-1]; 
+	}
+	$qlevs;
+}
